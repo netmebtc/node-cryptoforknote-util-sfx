@@ -166,6 +166,12 @@ NAN_METHOD(convert_blob) { // (parentBlockBuffer, cnBlobType)
     info.GetReturnValue().Set(returnValue);
 }
 
+NAN_METHOD(get_merged_mining_nonce_size) {
+    Local<Integer> returnValue = Nan::New(static_cast<uint32_t>(MM_NONCE_SIZE));
+    info.GetReturnValue().Set(returnValue);
+}
+
+
 NAN_METHOD(get_block_id) {
     if (info.Length() < 1) return THROW_ERROR_EXCEPTION("You must provide one argument.");
 
