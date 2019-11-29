@@ -93,9 +93,8 @@ namespace boost
   template <class Archive>
   inline void serialize(Archive &a, cryptonote::txout_to_script &x, const boost::serialization::version_type ver)
   {
-    a & x.output_type;
     a & x.keys;
-    a & x.data;
+    a & x.script;
   }
 
 
@@ -126,11 +125,9 @@ namespace boost
   template <class Archive>
   inline void serialize(Archive &a, cryptonote::txin_to_script &x, const boost::serialization::version_type ver)
   {
-    a & x.key_offsets;
-    a & x.k_image;
-    a & x.amount;
-    a & x.token_amount;
-    a & x.script;
+    a & x.prev;
+    a & x.prevout;
+    a & x.sigset;
   }
 
   template <class Archive>
@@ -193,7 +190,16 @@ namespace boost
     a & x.vin;
     a & x.vout;
     a & x.extra;
-    a & x.signatures;
+    if (x.version == 1)
+    {
+      a & x.signatures;
+    }
+    else
+    {
+      a & (rct::rctSigBase&)x.rct_signatures;
+      if (x.rct_signatures.type != rct::RCTTypeNull)
+        a & x.rct_signatures.p;
+    }
   }
 
   template <class Archive>

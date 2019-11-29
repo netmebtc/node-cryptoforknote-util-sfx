@@ -378,10 +378,10 @@ namespace rpc
         if (!res.error_details.empty()) res.error_details += " and ";
         res.error_details = "fee too low";
       }
-      if (tvc.m_non_supported_version)
+      if (tvc.m_not_rct)
       {
         if (!res.error_details.empty()) res.error_details += " and ";
-        res.error_details = "tx version is not supported";
+        res.error_details = "tx is not ringct";
       }
       if (res.error_details.empty())
       {

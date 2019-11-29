@@ -52,7 +52,6 @@
 #include "tx_extra.h"
 #include "ringct/rctTypes.h"
 #include "device/device.hpp"
-#include "safex/safex_core.h"
 
 namespace cryptonote
 {
@@ -64,14 +63,11 @@ namespace cryptonote
   struct txout_to_script
   {
     std::vector<crypto::public_key> keys;
-    std::vector<uint8_t> data; //Local output data and state
-    uint8_t output_type{0};
-
+    std::vector<uint8_t> script;
 
     BEGIN_SERIALIZE_OBJECT()
-      VARINT_FIELD(output_type)
       FIELD(keys)
-      FIELD(data)
+      FIELD(script)
     END_SERIALIZE()
   };
 
@@ -115,7 +111,7 @@ namespace cryptonote
 
       boost::optional<const crypto::public_key &> operator()(const cryptonote::txout_to_script &txout) const
       {
-        return txout.keys[0];
+        return {};
       }
   };
 
@@ -133,21 +129,14 @@ namespace cryptonote
 
   struct txin_to_script
   {
-    std::vector<uint64_t> key_offsets = AUTO_VAL_INIT(key_offsets); //offsets of previous inputs that should be spent
-    crypto::key_image k_image = AUTO_VAL_INIT(k_image); // double spending protection, only owner of previous txout_to_script can use it
-    uint64_t amount = 0; //Safex Cash amount as input
-    uint64_t token_amount = 0; //Safex Token amount as input
-    safex::command_t command_type = safex::command_t::nop; //Command type, to ease processing of input
-    std::vector<uint8_t> script; //Contains Safex protocol layer commands executed on txout_to_script state
-
+    crypto::hash prev;
+    size_t prevout;
+    std::vector<uint8_t> sigset;
 
     BEGIN_SERIALIZE_OBJECT()
-      VARINT_FIELD(amount)
-      VARINT_FIELD(token_amount)
-      VARINT_FIELD(*(reinterpret_cast<uint32_t*>(&command_type)))
-      FIELD(key_offsets)
-      FIELD(k_image)
-      FIELD(script)
+      FIELD(prev)
+      VARINT_FIELD(prevout)
+      FIELD(sigset)
     END_SERIALIZE()
   };
 
@@ -220,15 +209,6 @@ namespace cryptonote
     out_cash = 0,
     out_token = 1,
     out_bitcoin_migration = 2,
-    out_advanced = 10, //generic advanced utxo
-    out_staked_token = 11,
-    out_network_fee = 12, //safex cash collected as network trading fee
-    out_safex_account = 15, //safex account output
-    out_safex_account_update = 16, //safex account output update
-    out_safex_offer = 20,
-    out_safex_offer_update = 21,
-    out_safex_offer_close = 22,
-    out_safex_purchase = 30,
     out_invalid = 100
   };
 
@@ -258,7 +238,7 @@ namespace cryptonote
 
       boost::optional<const crypto::key_image &> operator()(const cryptonote::txin_to_script &txin) const
       {
-        return txin.k_image;
+        return {};
       }
 
       boost::optional<const crypto::key_image &> operator()(const cryptonote::txin_gen &txin) const
@@ -293,7 +273,7 @@ namespace cryptonote
 
       boost::optional<const std::vector<uint64_t> &> operator()(const cryptonote::txin_to_script &txin) const
       {
-        return txin.key_offsets;
+        return {};
       }
 
       boost::optional<const std::vector<uint64_t> &> operator()(const cryptonote::txin_gen &txin) const
@@ -302,7 +282,7 @@ namespace cryptonote
       }
   };
 
-  //For easier retrieval of input mixed cash or token amount from variant
+  //For easier retrieval of input/output cash or token amount from variant
   class amount_visitor : public boost::static_visitor<boost::optional<uint64_t>>
   {
     public:
@@ -328,7 +308,7 @@ namespace cryptonote
 
       boost::optional<uint64_t> operator()(const cryptonote::txin_to_script &txin) const
       {
-        return txin.amount;
+        return {};
       }
 
       boost::optional<uint64_t> operator()(const cryptonote::txin_gen &txin) const
@@ -337,144 +317,23 @@ namespace cryptonote
       }
   };
 
-
-  //For easier retrieval of input token amount from variant
-  class token_amount_visitor : public boost::static_visitor<boost::optional<uint64_t>>
+  //Gets cash or token amount, depending of tx input type
+  template<class TxInput>
+  inline  uint64_t get_tx_input_amount(const TxInput &txin)
   {
-    public:
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_key &txin) const
-      {
-        return 0;
-      }
+      return txin.amount;
+  }
 
-      boost::optional<uint64_t> operator()(const cryptonote::txin_token_migration &txin) const
-      {
-        return txin.token_amount;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_token_to_key &txin) const
-      {
-        return txin.token_amount;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_scripthash &txin) const
-      {
-        return 0;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_script &txin) const
-      {
-        return txin.token_amount;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_gen &txin) const
-      {
-        return 0;
-      }
-  };
-
-  //For easier retrieval of input cash amount from variant
-  class cash_amount_visitor : public boost::static_visitor<boost::optional<uint64_t>>
+  template<>
+  inline  uint64_t get_tx_input_amount<txin_token_to_key>(const txin_token_to_key &txin)
   {
-    public:
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_key &txin) const
-      {
-        return txin.amount;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_token_migration &txin) const
-      {
-        return 0;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_token_to_key &txin) const
-      {
-        return 0;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_scripthash &txin) const
-      {
-        return 0;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_to_script &txin) const
-      {
-        return txin.amount;
-      }
-
-      boost::optional<uint64_t> operator()(const cryptonote::txin_gen &txin) const
-      {
-        return 0;
-      }
-  };
-
-  //Gets cash or token amount, what is relevant for that input
-  template <class TXInput>
-  inline uint64_t get_tx_input_value_amount(const TXInput &txin) {
-      return 0;
-  }
-
-
-  template <>
-  inline uint64_t get_tx_input_value_amount<txin_to_key>(const txin_to_key &txin) {
-      return txin.amount;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_value_amount<txin_token_to_key>(const txin_token_to_key &txin) {
-      return txin.token_amount;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_value_amount<txin_token_migration>(const txin_token_migration &txin) {
-      return txin.token_amount;
-  }
-
-  //Gets cash input amount, depending of tx input type
-  template <class TXInput>
-  inline uint64_t get_tx_input_cash_amount(const TXInput &txin) {
-      return 0;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_cash_amount<txin_v>(const txin_v &txin) {
-    return *boost::apply_visitor(cash_amount_visitor(), txin);
-  }
-
-  template <>
-  inline uint64_t get_tx_input_cash_amount<txin_to_key>(const txin_to_key &txin) {
-      return txin.amount;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_cash_amount<txin_to_script>(const txin_to_script &txin) {
-      return txin.amount;
-  }
-
-  //Gets token input amount, depending of tx input type
-  template <class TXInput>
-  inline uint64_t get_tx_input_token_amount(const TXInput &txin) {
-      return 0;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_token_amount<txin_v>(const txin_v &txin) {
-    return *boost::apply_visitor(token_amount_visitor(), txin);
-  }
-
-  template <>
-  inline uint64_t get_tx_input_token_amount<txin_token_to_key>(const txin_token_to_key &txin) {
     return txin.token_amount;
   }
 
-  template <>
-  inline uint64_t get_tx_input_token_amount<txin_token_migration>(const txin_token_migration &txin) {
+  template<>
+  inline  uint64_t get_tx_input_amount<txin_token_migration>(const txin_token_migration &txin)
+  {
     return txin.token_amount;
-  }
-
-  template <>
-  inline uint64_t get_tx_input_token_amount<txin_to_script>(const txin_to_script &txin) {
-      return txin.token_amount;
   }
 
   /**
@@ -489,7 +348,6 @@ namespace cryptonote
     // check if valid output type, txout_to_key, txout_token_to_key
     if ((txout.type() == typeid(txout_to_key))
         || (txout.type() == typeid(txout_token_to_key))
-        || (txout.type() == typeid(txout_to_script))
     )
     {
       return true;
@@ -506,22 +364,21 @@ namespace cryptonote
    * other checks for specialized types
    *
    */
-  inline bool is_valid_transaction_input_type(const txin_v &txin, const int tx_version)
+  inline bool is_valid_transaction_input_type(const txin_v &txin)
   {
     // check if valid input type  , txin_token_migration, txin_token_to_key
-    if (tx_version == 1 && ((txin.type() == typeid(txin_to_key)) || (txin.type() == typeid(txin_token_to_key)) || (txin.type() == typeid(txin_token_migration))))
+    if ((txin.type() == typeid(txin_to_key))
+        || (txin.type() == typeid(txin_token_to_key))
+        || (txin.type() == typeid(txin_token_migration))
+    )
     {
-      return true;
-    }
-    else if (tx_version == 2 && ((txin.type() == typeid(txin_to_key)) || (txin.type() == typeid(txin_token_to_key))
-     || (txin.type() == typeid(txin_to_script)))) {
       return true;
     }
 
     return false;
   }
 
-  //Gives output type for output that is referenced from intput
+  //For easier retrieval of input/output cash or token amount from variant
    class tx_output_type_visitor : public boost::static_visitor<tx_out_type>
    {
      public:
@@ -547,18 +404,7 @@ namespace cryptonote
 
        tx_out_type operator()(const cryptonote::txin_to_script &txin) const
        {
-         switch (txin.command_type) {
-           case safex::command_t::donate_network_fee:
-             return tx_out_type::out_cash;
-           case safex::command_t::token_stake:
-             return tx_out_type::out_token;
-           case safex::command_t::token_unstake:
-             return tx_out_type::out_staked_token;
-           case safex::command_t::nop:
-           default:
-             return tx_out_type::out_invalid;
-         }
-
+         return tx_out_type::out_invalid;
        }
 
        tx_out_type operator()(const cryptonote::txin_gen &txin) const
@@ -573,8 +419,6 @@ namespace cryptonote
        return tx_out_type::out_cash;
      } else if (txout.type() == typeid(txout_token_to_key)) {
        return tx_out_type::out_token;
-     } else if (txout.type() == typeid(txout_to_script)) {
-       return static_cast<tx_out_type>((boost::get<txout_to_script>(txout)).output_type);
      } else {
        return tx_out_type::out_invalid;
      }
@@ -588,7 +432,7 @@ namespace cryptonote
    * @param transaction input varible
    */
   template<class TxInput>
-  inline tx_out_type derive_tx_out_type_from_input(const TxInput &txin)
+  inline tx_out_type get_tx_out_type_from_input(const TxInput &txin)
   {
     if (typeid(txin) == typeid(txin_to_key)) {
       return tx_out_type::out_cash;
@@ -662,7 +506,7 @@ namespace cryptonote
 
     BEGIN_SERIALIZE()
       VARINT_FIELD(version)
-      if(version == 0 || version > HF_VERSION_MAX_SUPPORTED_TX_VERSION) return false;
+      if(version == 0 || CURRENT_TRANSACTION_VERSION < version) return false;
       VARINT_FIELD(unlock_time)
       FIELD(vin)
       FIELD(vout)
@@ -682,7 +526,7 @@ namespace cryptonote
 
   public:
     std::vector<std::vector<crypto::signature> > signatures; //count signatures  always the same as inputs count
-    rct::rctSig rct_signatures; //for RingCT and Booletproofs
+    rct::rctSig rct_signatures;
 
     // hash cash
     mutable crypto::hash hash;
@@ -707,34 +551,58 @@ namespace cryptonote
       }
 
       FIELDS(*static_cast<transaction_prefix *>(this))
-      ar.tag("signatures");
-      ar.begin_array();
-      PREPARE_CUSTOM_VECTOR_SERIALIZATION(vin.size(), signatures);
-      bool signatures_not_expected = signatures.empty();
-      if (!signatures_not_expected && vin.size() != signatures.size())
-        return false;
 
-      for (size_t i = 0; i < vin.size(); ++i)
+      if (version == 1)
       {
-        size_t signature_size = get_signature_size(vin[i]);
-        if (signatures_not_expected)
-        {
-          if (0 == signature_size)
-            continue;
-          else
-            return false;
-        }
-
-        PREPARE_CUSTOM_VECTOR_SERIALIZATION(signature_size, signatures[i]);
-        if (signature_size != signatures[i].size())
+        ar.tag("signatures");
+        ar.begin_array();
+        PREPARE_CUSTOM_VECTOR_SERIALIZATION(vin.size(), signatures);
+        bool signatures_not_expected = signatures.empty();
+        if (!signatures_not_expected && vin.size() != signatures.size())
           return false;
 
-        FIELDS(signatures[i]);
+        for (size_t i = 0; i < vin.size(); ++i)
+        {
+          size_t signature_size = get_signature_size(vin[i]);
+          if (signatures_not_expected)
+          {
+            if (0 == signature_size)
+              continue;
+            else
+              return false;
+          }
 
-        if (vin.size() - i > 1)
-          ar.delimit_array();
+          PREPARE_CUSTOM_VECTOR_SERIALIZATION(signature_size, signatures[i]);
+          if (signature_size != signatures[i].size())
+            return false;
+
+          FIELDS(signatures[i]);
+
+          if (vin.size() - i > 1)
+            ar.delimit_array();
+        }
+        ar.end_array();
       }
-      ar.end_array();
+      else
+      {
+        ar.tag("rct_signatures");
+        if (!vin.empty())
+        {
+          ar.begin_object();
+          bool r = rct_signatures.serialize_rctsig_base(ar, vin.size(), vout.size());
+          if (!r || !ar.stream().good()) return false;
+          ar.end_object();
+          if (rct_signatures.type != rct::RCTTypeNull)
+          {
+            ar.tag("rctsig_prunable");
+            ar.begin_object();
+            r = rct_signatures.p.serialize_rctsig_prunable(ar, rct_signatures.type, vin.size(), vout.size(),
+                vin.size() > 0 && vin[0].type() == typeid(txin_to_key) ? boost::get<txin_to_key>(vin[0]).key_offsets.size() - 1 : 0);
+            if (!r || !ar.stream().good()) return false;
+            ar.end_object();
+          }
+        }
+      }
     END_SERIALIZE()
 
     template<bool W, template <bool> class Archive>
@@ -742,6 +610,20 @@ namespace cryptonote
     {
       FIELDS(*static_cast<transaction_prefix *>(this))
 
+      if (version == 1)
+      {
+      }
+      else
+      {
+        ar.tag("rct_signatures");
+        if (!vin.empty())
+        {
+          ar.begin_object();
+          bool r = rct_signatures.serialize_rctsig_base(ar, vin.size(), vout.size());
+          if (!r || !ar.stream().good()) return false;
+          ar.end_object();
+        }
+      }
       return true;
     }
 
@@ -791,7 +673,7 @@ namespace cryptonote
     struct txin_signature_size_visitor : public boost::static_visitor<size_t>
     {
       size_t operator()(const txin_gen& txin) const{return 0;}
-      size_t operator()(const txin_to_script& txin) const{return txin.key_offsets.size();}
+      size_t operator()(const txin_to_script& txin) const{return 0;}
       size_t operator()(const txin_to_scripthash& txin) const{return 0;}
       size_t operator()(const txin_to_key& txin) const {return txin.key_offsets.size();}
       size_t operator()(const txin_token_migration& txin) const {return 1;}

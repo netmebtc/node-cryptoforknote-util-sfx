@@ -48,12 +48,7 @@ namespace cryptonote
     bool m_too_big;
     bool m_overspend;
     bool m_fee_too_low;
-    bool m_non_supported_version;
-    bool m_safex_verification_failed;
-    bool m_safex_invalid_command;
-    bool m_safex_invalid_command_params;
-    bool m_safex_invalid_input;
-    bool m_safex_command_execution_failed;
+    bool m_not_rct;
   };
 
   struct block_verification_context

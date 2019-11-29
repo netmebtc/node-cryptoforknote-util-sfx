@@ -108,9 +108,7 @@ namespace cryptonote
 
   }
   //---------------------------------------------------------------------------------
-
-  //---------------------------------------------------------------------------------
-  bool tx_memory_pool::add_tx(transaction &tx, const crypto::hash &id, size_t blob_size, tx_verification_context& tvc, bool kept_by_block, bool relayed, bool do_not_relay, uint8_t version)
+  bool tx_memory_pool::add_tx(transaction &tx, /*const crypto::hash& tx_prefix_hash,*/ const crypto::hash &id, size_t blob_size, tx_verification_context& tvc, bool kept_by_block, bool relayed, bool do_not_relay, uint8_t version)
   {
     // this should already be called with that lock, but let's make it explicit for clarity
     CRITICAL_REGION_LOCAL(m_transactions_lock);
@@ -144,16 +142,16 @@ namespace cryptonote
     // fee per kilobyte, size rounded up.
     uint64_t fee;
 
-    if (tx.version >= HF_VERSION_MIN_SUPPORTED_TX_VERSION && tx.version <= HF_VERSION_MAX_SUPPORTED_TX_VERSION)
+    if (tx.version == 1)
     {
       uint64_t inputs_amount = 0;
-      if(!get_inputs_cash_amount(tx, inputs_amount))
+      if(!get_inputs_money_amount(tx, inputs_amount))
       {
         tvc.m_verifivation_failed = true;
         return false;
       }
 
-      uint64_t outputs_amount = get_outs_cash_amount(tx);
+      uint64_t outputs_amount = get_outs_money_amount(tx);
       if(outputs_amount > inputs_amount)
       {
         LOG_PRINT_L1("transaction use more money than it has: use " << print_money(outputs_amount) << ", have " << print_money(inputs_amount));
@@ -170,36 +168,10 @@ namespace cryptonote
       }
 
       fee = inputs_amount - outputs_amount;
-
-      uint64_t inputs_token_amount = 0;
-      if(!get_inputs_token_amount(tx, inputs_token_amount))
-      {
-        tvc.m_verifivation_failed = true;
-        return false;
-      }
-
-      uint64_t outputs_token_amount = get_outs_token_amount(tx);
-      if(outputs_token_amount != inputs_token_amount)
-      {
-        LOG_PRINT_L1("Transaction must use same amount of tokens on input and output - output: " << print_money(outputs_token_amount) << ", input " << print_money(inputs_token_amount));
-        tvc.m_verifivation_failed = true;
-        tvc.m_overspend = true;
-        return false;
-      }
-
-      //Here check for tx related safex logic
-      if ((tx.version > HF_VERSION_MIN_SUPPORTED_TX_VERSION) && !m_blockchain.check_safex_tx(tx, tvc))
-      {
-        tvc.m_verifivation_failed = true;
-        tvc.m_safex_verification_failed = true;
-        return false;
-      }
     }
     else
     {
-      tvc.m_verifivation_failed = true;
-      tvc.m_invalid_input = true;
-      return false;
+      fee = tx.rct_signatures.txnFee;
     }
 
     if (!kept_by_block && !m_blockchain.check_fee(blob_size, fee))
@@ -292,8 +264,7 @@ namespace cryptonote
         tvc.m_invalid_input = true;
         return false;
       }
-    }
-    else
+    }else
     {
       //update transactions container
       meta.blob_size = blob_size;
@@ -421,7 +392,7 @@ namespace cryptonote
     for(const auto& in: tx.vin)
     {
       const crypto::hash id = get_transaction_hash(tx);
-      if (cryptonote::is_valid_transaction_input_type(in, tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(in)) {
         const crypto::key_image &k_image = *boost::apply_visitor(key_image_visitor(), in);
         std::unordered_set<crypto::hash>& kei_image_set = m_spent_key_images[k_image];
         CHECK_AND_ASSERT_MES(kept_by_block || kei_image_set.size() == 0, false, "internal error: kept_by_block=" << kept_by_block
@@ -449,7 +420,7 @@ namespace cryptonote
     crypto::hash actual_hash = get_transaction_hash(tx);
     for(const txin_v& vi: tx.vin)
     {
-      if (cryptonote::is_valid_transaction_input_type(vi, tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(vi)) {
         const crypto::key_image &k_image = *boost::apply_visitor(key_image_visitor(), vi);
         auto it = m_spent_key_images.find(k_image);
         CHECK_AND_ASSERT_MES(it != m_spent_key_images.end(), false, "failed to find transaction input in key images. img=" << k_image << ENDL
@@ -944,7 +915,7 @@ namespace cryptonote
     CRITICAL_REGION_LOCAL1(m_blockchain);
     for(const auto& in: tx.vin)
     {
-      if (cryptonote::is_valid_transaction_input_type(in, tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(in)) {
         const crypto::key_image &k_image = *boost::apply_visitor(key_image_visitor(), in);
         if(have_tx_keyimg_as_spent(k_image))
           return true;
@@ -1024,7 +995,7 @@ namespace cryptonote
     for(size_t i = 0; i!= tx.vin.size(); i++)
     {
       const txin_v &in = tx.vin[i];
-      if (cryptonote::is_valid_transaction_input_type(in, tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(in)) {
         auto k_image_opt = boost::apply_visitor(key_image_visitor(), in);
         CHECK_AND_ASSERT_MES(k_image_opt, false, "key image available in input is not valid");
         if(k_images.count(*k_image_opt))
@@ -1041,7 +1012,7 @@ namespace cryptonote
   {
     for(size_t i = 0; i!= tx.vin.size(); i++)
     {
-      if (cryptonote::is_valid_transaction_input_type(tx.vin[i], tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(tx.vin[i])) {
         auto k_image_opt = boost::apply_visitor(key_image_visitor(), tx.vin[i]);
         CHECK_AND_ASSERT_MES(k_image_opt, false, "key image available in input is not valid");
         auto i_res = k_images.insert(*k_image_opt);
@@ -1063,7 +1034,7 @@ namespace cryptonote
     {
       //CHECKED_GET_SPECIFIC_VARIANT(tx.vin[i], const txin_to_key, itk, void());
       const txin_v &in = tx.vin[i];
-      if (cryptonote::is_valid_transaction_input_type(in, tx.version)) {
+      if (cryptonote::is_valid_transaction_input_type(in)) {
         const crypto::key_image &k_image = *boost::apply_visitor(key_image_visitor(), in);
         const key_images_container::const_iterator it = m_spent_key_images.find(k_image);
         if (it != m_spent_key_images.end())
