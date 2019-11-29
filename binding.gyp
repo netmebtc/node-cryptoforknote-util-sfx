@@ -32,6 +32,14 @@
                     "-lboost_date_time",
                 ]
             },
+            'defines': [
+                'AUTO_INITIALIZE_EASYLOGGINGPP',
+                'BLOCKCHAIN_DB=DB_LMDB',
+                "DEFAULT_DB_TYPE=\"lmdb\"",
+                'HAVE_READLINE',
+                'HAVE_STRPTIME'
+
+            ],
             'cflags!': ['-O3',],
             'cflags': ["-maes","-march=x86-64"],
             'cflags_cc!': [ '-fno-rtti', '-fno-exceptions', '-std=gnu++0x'],
