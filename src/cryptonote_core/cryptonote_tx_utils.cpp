@@ -109,7 +109,7 @@ namespace cryptonote
     // from hard fork 4, we use a single "dusty" output. This makes the tx even smaller,
     // and avoids the quantization. These outputs will be added as rct outputs with identity
     // masks, to they can be used as rct inputs.
-    if (hard_fork_version >= 2 && hard_fork_version < 4) {
+    if (hard_fork_version >= 2 && hard_fork_version < 5) {
       block_reward = block_reward - block_reward % ::config::BASE_REWARD_CLAMP_THRESHOLD;
     }
 
