@@ -104,7 +104,7 @@ static const struct {
   { 3, 92200, 0, 1546602383 },
   { 4, config::HARDFORK_V4_START_HEIGHT, 0, 1565962165},
   //version 5 starts from block 335252, fork time finalized on 2019-12-11
-  { 5, 334437, 0, 1576069200}
+  { 5, 335252, 0, 1576069200}
 };
 static const uint64_t mainnet_hard_fork_version_1_till = 61659;
 
